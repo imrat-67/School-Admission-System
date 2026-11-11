@@ -1,0 +1,29 @@
+# Run backend tests (needs only Docker):
+#   docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from tests
+#   docker compose -f docker-compose.test.yml down -v
+services:
+  testdb:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: admission
+      POSTGRES_PASSWORD: admission
+      POSTGRES_DB: admission_test
+    command: ["postgres", "-c", "max_connections=300"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admission -d admission_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  tests:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    working_dir: /src
+    volumes:
+      - ./backend:/src
+    environment:
+      TEST_DB_CONNECTION: "Host=testdb;Port=5432;Database=admission_test;Username=admission;Password=admission;Maximum Pool Size=200"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    command: ["dotnet", "test", "SchoolAdmission.Tests/SchoolAdmission.Tests.csproj", "--logger", "console;verbosity=normal"]
+    depends_on:
+      testdb:
+        condition: service_healthy
