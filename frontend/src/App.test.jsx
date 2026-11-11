@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { fmtCountdown, effectiveStatus, HoldCard } from './App.jsx';
+import { fmtCountdown, effectiveStatus, HoldCard, parseClassName, classLabel } from './App.jsx';
 import { errorText, ApiError } from './api.js';
 
 const NOW = Date.parse('2026-01-01T10:00:00Z');
@@ -38,5 +38,13 @@ describe('error messages', () => {
   it('shows friendly text for sold out and server down', () => {
     expect(errorText(new ApiError(409, 'SEATS_FULL', 'x'))).toContain('আসন');
     expect(errorText(new ApiError(0, 'NETWORK', 'network'))).toContain('সার্ভার');
+  });
+});
+
+describe('class names', () => {
+  it('understands Bangladesh class and shift names', () => {
+    expect(parseClassName('Class 8 Day Shift')).toEqual({ level: 8, shift: 'Day' });
+    expect(classLabel('Class 10 Morning Shift')).toContain('ক্লাস 10');
+    expect(classLabel('Something else')).toBe('Something else');
   });
 });
