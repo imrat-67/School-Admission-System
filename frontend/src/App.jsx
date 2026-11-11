@@ -101,7 +101,10 @@ export function HoldCard({ h, now, busy, onPay, onCancel, onOpen }) {
   );
 }
 
-function Header({ admin, studentId, onLogout }) {
+function Header({ admin, studentId, route }) {
+  const myGroup = /^\/(my|application|pay|success)(\/|$)/.test(route);
+  const onSwitch = route.startsWith('/switch');
+  const classesOn = !myGroup && !onSwitch;
   return (
     <header className={`topbar ${admin ? 'admin' : ''}`}>
       <div className="topbar-in">
@@ -110,28 +113,51 @@ function Header({ admin, studentId, onLogout }) {
           <span><b>{admin ? 'প্রশাসক প্যানেল' : 'অনলাইন স্কুল ভর্তি পোর্টাল'}</b><small>{admin ? 'ক্লাস ও আসন ব্যবস্থাপনা' : 'ষষ্ঠ থেকে দশম শ্রেণি · শিক্ষাবর্ষ ২০২৭'}</small></span>
         </a>
         {!admin && studentId && (
-          <nav>
-            <a href="#/">ক্লাসসমূহ</a>
-            <a href="#/my">আমার আবেদন</a>
-            <span className="sid" title="শিক্ষার্থীর জন্ম নিবন্ধন নম্বর">👤 {studentId.slice(0, 4)}…{studentId.slice(-3)}</span>
-            <button className="ghost light" onClick={onLogout}>পরিবর্তন</button>
+          <nav aria-label="প্রধান মেনু">
+            <a href="#/" className={classesOn ? 'on' : ''} aria-current={classesOn ? 'page' : undefined}>ক্লাসসমূহ</a>
+            <a href="#/my" className={myGroup ? 'on' : ''} aria-current={myGroup ? 'page' : undefined}>আমার আবেদন</a>
+            <span className="sid" title="শিক্ষার্থীর জন্ম নিবন্ধন নম্বর">জন্ম নিবন্ধন নং <b>{studentId}</b></span>
+            <a className="btn ghost light" href="#/switch">শিক্ষার্থী বদলান</a>
           </nav>
         )}
-        {admin && <nav><a href="#/">← অভিভাবক পোর্টাল</a></nav>}
+        {admin && <nav><a href="#/">← অভিভাবক পোর্টালে যান</a></nav>}
       </div>
     </header>
   );
 }
 
-function Gate({ onSave }) {
-  const [text, setText] = useState('');
+function Gate({ onSave, initial = '', onCancel }) {
+  const [text, setText] = useState(initial);
   const [err, setErr] = useState('');
+  const switching = Boolean(onCancel);
   const save = (e) => {
     e && e.preventDefault();
     const v = text.trim();
     if (!ID_RE.test(v)) { setErr('জন্ম নিবন্ধন নম্বর ঠিক ১৭টি সংখ্যার হতে হবে (ইংরেজি 0-9 সংখ্যা লিখুন)।'); return; }
     setErr(''); onSave(v);
   };
+  const form = (
+    <form className={switching ? 'card status' : 'card gate'} onSubmit={save}>
+      <h2>{switching ? 'শিক্ষার্থী বদলান' : 'শুরু করুন'}</h2>
+      {switching && <p className="muted">অন্য শিক্ষার্থীর আবেদন দেখতে বা নতুন আবেদন করতে তার জন্ম নিবন্ধন নম্বর দিন। এখন দেখছেন: <b>{initial}</b></p>}
+      <label htmlFor="sid">শিক্ষার্থীর জন্ম নিবন্ধন নম্বর (১৭ সংখ্যা)</label>
+      <input id="sid" inputMode="numeric" maxLength={17} value={text} placeholder="যেমন 20120101234567890"
+             onChange={(e) => setText(e.target.value)} autoFocus={switching} />
+      {err && <p className="field-error" role="alert">{err}</p>}
+      {switching ? (
+        <div className="row">
+          <button type="submit" className="big">নম্বর পরিবর্তন করুন</button>
+          <button type="button" className="ghost big" onClick={onCancel}>← ফিরে যান</button>
+        </div>
+      ) : (
+        <>
+          <button type="submit" className="big">এগিয়ে যান</button>
+          <p className="muted small">এই নম্বরটি দিয়েই আপনার আবেদনগুলো শনাক্ত হবে। আলাদা লগইন লাগবে না।</p>
+        </>
+      )}
+    </form>
+  );
+  if (switching) return form;
   return (
     <section className="hero">
       <div className="hero-text">
@@ -141,15 +167,7 @@ function Gate({ onSave }) {
           <li>১. শিক্ষার্থীর তথ্য দিন</li><li>২. ক্লাস ও শিফট বাছাই করুন</li><li>৩. ভর্তি ফি দিন</li>
         </ol>
       </div>
-      <form className="card gate" onSubmit={save}>
-        <h2>শুরু করুন</h2>
-        <label htmlFor="sid">শিক্ষার্থীর জন্ম নিবন্ধন নম্বর (১৭ সংখ্যা)</label>
-        <input id="sid" inputMode="numeric" maxLength={17} value={text} placeholder="যেমন 20120101234567890"
-               onChange={(e) => setText(e.target.value)} />
-        {err && <p className="field-error" role="alert">{err}</p>}
-        <button type="submit" className="big">এগিয়ে যান</button>
-        <p className="muted small">এই নম্বরটি দিয়েই আপনার আবেদনগুলো শনাক্ত হবে। আলাদা লগইন লাগবে না।</p>
-      </form>
+      {form}
     </section>
   );
 }
@@ -187,7 +205,7 @@ function ClassesPage({ classes, busyId, onApply, error }) {
   };
   return (
     <>
-      <div className="pagehead"><h1>ভর্তির জন্য ক্লাস বেছে নিন</h1><p className="muted">আসন সংখ্যা প্রতি কয়েক সেকেন্ড পরপর নিজে থেকেই হালনাগাদ হয়।</p></div>
+      <div className="pagehead"><h1>ভর্তির জন্য ক্লাস বেছে নিন</h1><p className="muted">শ্রেণি ও শিফট বেছে "আবেদন করুন" চাপলে নির্দিষ্ট সময়ের জন্য আসনটি আপনার নামে ধরে রাখা হবে; ওই সময়ের মধ্যে ভর্তি ফি দিয়ে নিশ্চিত করুন।</p></div>
       {classes === null && !error && <p className="muted">লোড হচ্ছে…</p>}
       {classes && list.length === 0 && <div className="card center"><h2>এখনও কোনো ক্লাস চালু হয়নি</h2><p className="muted">স্কুল কর্তৃপক্ষ ক্লাস চালু করলে এখানে দেখতে পাবেন। একটু পরে আবার দেখুন।</p></div>}
       {list.length > 0 && (
@@ -412,7 +430,6 @@ export default function App() {
   useEffect(() => { setInfo(''); }, [route]);
 
   const saveStudent = (v) => { localStorage.setItem(STORAGE_KEY, v); setStudentId(v); setError(''); setInfo(''); };
-  const logout = () => { localStorage.removeItem(STORAGE_KEY); setStudentId(''); setHolds([]); go('/'); };
 
   const apply = async (c) => {
     setError(''); setInfo(''); setBusyId('class:' + c.id);
@@ -447,6 +464,8 @@ export default function App() {
     page = <AdminPage classes={classes} onChanged={loadClasses} onError={setError} onInfo={setInfo} />;
   } else if (!loggedIn) {
     page = <Gate onSave={saveStudent} />;
+  } else if (seg[0] === 'switch') {
+    page = <Gate initial={studentId} onSave={(v) => { saveStudent(v); go('/'); }} onCancel={() => go('/')} />;
   } else if (seg[0] === 'application') {
     page = <StatusPage hold={holdOf(seg[1])} now={now} busyId={busyId} onCancel={cancel} />;
   } else if (seg[0] === 'pay') {
@@ -461,7 +480,7 @@ export default function App() {
 
   return (
     <div className={isAdmin ? 'app admin' : 'app'}>
-      <Header admin={isAdmin} studentId={loggedIn ? studentId : ''} onLogout={logout} />
+      <Header admin={isAdmin} studentId={loggedIn ? studentId : ''} route={route} />
       <main className="wrap">
         <Banner msg={error} onClose={() => setError('')} />
         <Banner msg={info} kind="info" onClose={() => setInfo('')} />
@@ -469,7 +488,6 @@ export default function App() {
       </main>
       <footer className="foot">
         <span>© অনলাইন স্কুল ভর্তি পোর্টাল</span>
-        {isAdmin ? <a href="#/">অভিভাবক পোর্টালে ফিরুন</a> : <a href="#/admin">স্কুল কর্তৃপক্ষের প্রবেশ</a>}
       </footer>
     </div>
   );
