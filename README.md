@@ -71,3 +71,11 @@ docker compose -f docker-compose.test.yml down -v
 Applying runs in one database transaction that first locks the class row (`SELECT ... FOR UPDATE`), then counts active holds + confirmed seats, then inserts. So many students applying at the same moment are handled one at a time per class and `held + confirmed <= totalSeats` always holds. Expiry uses the database clock (`expires_at > now()`), so an expired hold stops counting immediately without any API call; a background job also marks old rows `EXPIRED`.
 
 See also: [ASSUMPTIONS.md](ASSUMPTIONS.md), [AI_USAGE.md](AI_USAGE.md).
+
+Frontend tests (bonus, Vitest + React Testing Library: countdown, auto-disable of the pay button after expiry, friendly error texts). Needs Node 20+:
+
+```bash
+cd frontend
+npm install
+npm test
+```
