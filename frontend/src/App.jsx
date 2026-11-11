@@ -6,8 +6,8 @@ const STORAGE_KEY = 'studentId';
 const REFRESH_MS = 4000;
 const CLASS_LEVELS = [6, 7, 8, 9, 10];
 const SHIFTS = [
-  { key: 'Morning', bn: 'প্রভাতি শিফট', time: 'সকাল ৮:০০ – দুপুর ১:০০' },
-  { key: 'Day', bn: 'দিবা শিফট', time: 'দুপুর ১:৩০ – সন্ধ্যা ৬:০০' }
+  { key: 'Morning', bn: 'প্রভাতি শিফট' },
+  { key: 'Day', bn: 'দিবা শিফট' }
 ];
 
 const STATUS_BN = {
@@ -27,6 +27,11 @@ export const fmtCountdown = (ms) => {
 // a HELD application whose time is over counts as EXPIRED right away (no reload needed)
 export const effectiveStatus = (h, now) =>
   h.status === 'HELD' && Date.parse(h.expiresAt) <= now ? 'EXPIRED' : h.status;
+
+// one birth registration number = one application: a student with a running (HELD, not expired)
+// or confirmed application cannot start another one (UI rule; the API itself only limits per class)
+export const activeHold = (holds, now) =>
+  (holds || []).find((h) => ['HELD', 'CONFIRMED'].includes(effectiveStatus(h, now))) || null;
 
 export const parseClassName = (name) => {
   const m = /^Class\s+(\d+)\s+(Morning|Day)\s+Shift$/i.exec((name || '').trim());
@@ -101,23 +106,19 @@ export function HoldCard({ h, now, busy, onPay, onCancel, onOpen }) {
   );
 }
 
-function Header({ admin, studentId, route }) {
+function Header({ admin, route }) {
   const myGroup = /^\/(my|application|pay|success)(\/|$)/.test(route);
-  const onSwitch = route.startsWith('/switch');
-  const classesOn = !myGroup && !onSwitch;
   return (
     <header className={`topbar ${admin ? 'admin' : ''}`}>
       <div className="topbar-in">
         <a className="brand" href={admin ? '#/admin' : '#/'}>
           <span className="logo" aria-hidden="true">🎓</span>
-          <span><b>{admin ? 'প্রশাসক প্যানেল' : 'অনলাইন স্কুল ভর্তি পোর্টাল'}</b><small>{admin ? 'ক্লাস ও আসন ব্যবস্থাপনা' : 'ষষ্ঠ থেকে দশম শ্রেণি · শিক্ষাবর্ষ ২০২৭'}</small></span>
+          <span><b>{admin ? 'প্রশাসক প্যানেল' : 'অনলাইন স্কুল ভর্তি পোর্টাল'}</b><small>{admin ? 'ক্লাস ও আসন ব্যবস্থাপনা' : 'ষষ্ঠ থেকে দশম শ্রেণি'}</small></span>
         </a>
-        {!admin && studentId && (
+        {!admin && (
           <nav aria-label="প্রধান মেনু">
-            <a href="#/" className={classesOn ? 'on' : ''} aria-current={classesOn ? 'page' : undefined}>ক্লাসসমূহ</a>
+            <a href="#/" className={!myGroup ? 'on' : ''} aria-current={!myGroup ? 'page' : undefined}>ক্লাসসমূহ</a>
             <a href="#/my" className={myGroup ? 'on' : ''} aria-current={myGroup ? 'page' : undefined}>আমার আবেদন</a>
-            <span className="sid" title="শিক্ষার্থীর জন্ম নিবন্ধন নম্বর">জন্ম নিবন্ধন নং <b>{studentId}</b></span>
-            <a className="btn ghost light" href="#/switch">শিক্ষার্থী বদলান</a>
           </nav>
         )}
         {admin && <nav><a href="#/">← অভিভাবক পোর্টালে যান</a></nav>}
@@ -126,53 +127,44 @@ function Header({ admin, studentId, route }) {
   );
 }
 
-function Gate({ onSave, initial = '', onCancel }) {
-  const [text, setText] = useState(initial);
+// the box at the top of every guardian page where the student's birth registration number is typed
+function StudentBar({ studentId, onSave }) {
+  const [text, setText] = useState(studentId);
+  const [editing, setEditing] = useState(!studentId);
   const [err, setErr] = useState('');
-  const switching = Boolean(onCancel);
+  useEffect(() => { setText(studentId); setEditing(!studentId); setErr(''); }, [studentId]);
   const save = (e) => {
-    e && e.preventDefault();
+    e.preventDefault();
     const v = text.trim();
     if (!ID_RE.test(v)) { setErr('জন্ম নিবন্ধন নম্বর ঠিক ১৭টি সংখ্যার হতে হবে (ইংরেজি 0-9 সংখ্যা লিখুন)।'); return; }
     setErr(''); onSave(v);
   };
-  const form = (
-    <form className={switching ? 'card status' : 'card gate'} onSubmit={save}>
-      <h2>{switching ? 'শিক্ষার্থী বদলান' : 'শুরু করুন'}</h2>
-      {switching && <p className="muted">অন্য শিক্ষার্থীর আবেদন দেখতে বা নতুন আবেদন করতে তার জন্ম নিবন্ধন নম্বর দিন। এখন দেখছেন: <b>{initial}</b></p>}
-      <label htmlFor="sid">শিক্ষার্থীর জন্ম নিবন্ধন নম্বর (১৭ সংখ্যা)</label>
-      <input id="sid" inputMode="numeric" maxLength={17} value={text} placeholder="যেমন 20120101234567890"
-             onChange={(e) => setText(e.target.value)} autoFocus={switching} />
-      {err && <p className="field-error" role="alert">{err}</p>}
-      {switching ? (
-        <div className="row">
-          <button type="submit" className="big">নম্বর পরিবর্তন করুন</button>
-          <button type="button" className="ghost big" onClick={onCancel}>← ফিরে যান</button>
-        </div>
-      ) : (
-        <>
-          <button type="submit" className="big">এগিয়ে যান</button>
-          <p className="muted small">এই নম্বরটি দিয়েই আপনার আবেদনগুলো শনাক্ত হবে। আলাদা লগইন লাগবে না।</p>
-        </>
-      )}
-    </form>
-  );
-  if (switching) return form;
   return (
-    <section className="hero">
-      <div className="hero-text">
-        <h1>আপনার সন্তানের ভর্তি, এখন অনলাইনে</h1>
-        <p>পছন্দের ক্লাস ও শিফট বেছে নিন, আসন ধরে রাখুন এবং নির্ধারিত সময়ের মধ্যে ভর্তি ফি দিয়ে ভর্তি নিশ্চিত করুন।</p>
-        <ol className="steps-mini">
-          <li>১. শিক্ষার্থীর তথ্য দিন</li><li>২. ক্লাস ও শিফট বাছাই করুন</li><li>৩. ভর্তি ফি দিন</li>
-        </ol>
+    <div className="studentbar">
+      <div className="studentbar-in">
+        {editing ? (
+          <form className="sb-form" onSubmit={save}>
+            <label htmlFor="sid">শিক্ষার্থীর জন্ম নিবন্ধন নম্বর (১৭ সংখ্যা)</label>
+            <div className="row nowrap">
+              <input id="sid" inputMode="numeric" maxLength={17} value={text} placeholder="যেমন 20120101234567890"
+                     onChange={(e) => setText(e.target.value)} />
+              <button type="submit">সংরক্ষণ করুন</button>
+              {studentId && <button type="button" className="ghost" onClick={() => { setEditing(false); setText(studentId); setErr(''); }}>বাদ দিন</button>}
+            </div>
+            {err && <p className="field-error" role="alert">{err}</p>}
+          </form>
+        ) : (
+          <div className="sb-show">
+            <span title="শিক্ষার্থীর জন্ম নিবন্ধন নম্বর">শিক্ষার্থীর জন্ম নিবন্ধন নং <b>{studentId}</b></span>
+            <button type="button" className="ghost" onClick={() => setEditing(true)}>নম্বর পরিবর্তন</button>
+          </div>
+        )}
       </div>
-      {form}
-    </section>
+    </div>
   );
 }
 
-function ClassesPage({ classes, busyId, onApply, error }) {
+function ClassesPage({ classes, busyId, onApply, error, lock, current, now }) {
   const [level, setLevel] = useState(6);
   const list = classes || [];
   const byShift = (sh) => list.find((c) => { const p = parseClassName(c.name); return p && p.level === level && p.shift === sh; });
@@ -181,7 +173,7 @@ function ClassesPage({ classes, busyId, onApply, error }) {
   const card = (c, sh) => {
     if (!c) return (
       <div className="classcard empty" key={sh.key}>
-        <h3>{sh.bn}</h3><p className="muted small">{sh.time}</p>
+        <h3>{sh.bn}</h3>
         <p className="muted">এই শিফটের ক্লাস এখনও চালু হয়নি।</p>
       </div>
     );
@@ -189,7 +181,6 @@ function ClassesPage({ classes, busyId, onApply, error }) {
     return (
       <div className="classcard" key={c.id}>
         <div className="cc-head"><h3>{sh ? sh.bn : c.name}</h3>{full && <span className="badge expired">আসন শেষ</span>}</div>
-        {sh && <p className="muted small">{sh.time}</p>}
         <div className="avail"><b>{c.availableSeats}</b><span>টি আসন খালি</span></div>
         <Seats c={c} />
         <ul className="legend">
@@ -197,7 +188,7 @@ function ClassesPage({ classes, busyId, onApply, error }) {
           <li><i className="dot held" />ধরা আছে {c.heldSeats}</li>
           <li>মোট {c.totalSeats}</li>
         </ul>
-        <button className="big" disabled={full || busyId === 'class:' + c.id} onClick={() => onApply(c)}>
+        <button className="big" disabled={full || Boolean(lock) || busyId === 'class:' + c.id} onClick={() => onApply(c)}>
           {full ? 'আসন নেই' : busyId === 'class:' + c.id ? 'অপেক্ষা করুন…' : 'আবেদন করুন'}
         </button>
       </div>
@@ -206,6 +197,13 @@ function ClassesPage({ classes, busyId, onApply, error }) {
   return (
     <>
       <div className="pagehead"><h1>ভর্তির জন্য ক্লাস বেছে নিন</h1><p className="muted">শ্রেণি ও শিফট বেছে "আবেদন করুন" চাপলে নির্দিষ্ট সময়ের জন্য আসনটি আপনার নামে ধরে রাখা হবে; ওই সময়ের মধ্যে ভর্তি ফি দিয়ে নিশ্চিত করুন।</p></div>
+      {lock === 'noid' && <div className="notice warn">আবেদন করতে আগে উপরের ঘরে শিক্ষার্থীর জন্ম নিবন্ধন নম্বর দিয়ে "সংরক্ষণ করুন" চাপুন।</div>}
+      {lock === 'active' && current && (
+        <div className="notice warn">
+          এই শিক্ষার্থীর <b>{classLabel(current.className)}</b>-এ একটি আবেদন ({STATUS_BN[effectiveStatus(current, now)]}) আছে। একটি জন্ম নিবন্ধন নম্বর দিয়ে একটির বেশি আবেদন করা যায় না। অন্য ক্লাসে আবেদন করতে চাইলে আগের আবেদনটি বাতিল করুন বা এর সময় শেষ হওয়া পর্যন্ত অপেক্ষা করুন।{' '}
+          <a href={'#/application/' + current.holdId}>আবেদনটি দেখুন</a>
+        </div>
+      )}
       {classes === null && !error && <p className="muted">লোড হচ্ছে…</p>}
       {classes && list.length === 0 && <div className="card center"><h2>এখনও কোনো ক্লাস চালু হয়নি</h2><p className="muted">স্কুল কর্তৃপক্ষ ক্লাস চালু করলে এখানে দেখতে পাবেন। একটু পরে আবার দেখুন।</p></div>}
       {list.length > 0 && (
@@ -249,7 +247,7 @@ function StatusPage({ hold, now, busyId, onCancel }) {
         )}
         {st === 'EXPIRED' && <div className="notice warn">সময় শেষ হয়ে গেছে, আসনটি ছেড়ে দেওয়া হয়েছে। চাইলে ক্লাস তালিকা থেকে নতুন করে আবেদন করতে পারেন।</div>}
         {st === 'CANCELLED' && <div className="notice">এই আবেদনটি বাতিল করা হয়েছে।</div>}
-        {st === 'CONFIRMED' && <div className="notice ok">ভর্তি ফি জমা হয়েছে, আপনার সন্তানের আসন নিশ্চিত। 🎉</div>}
+        {st === 'CONFIRMED' && <div className="notice ok">ভর্তি ফি জমা হয়েছে, আপনার সন্তানের আসন নিশ্চিত।</div>}
         <div className="row">
           <button className="big" disabled={st !== 'HELD' || busyId === hold.holdId} onClick={() => go('/pay/' + hold.holdId)}>ভর্তি ফি দিন</button>
           <button className="secondary big" disabled={st !== 'HELD' || busyId === hold.holdId} onClick={() => onCancel(hold)}>বাতিল</button>
@@ -295,14 +293,14 @@ function SuccessPage({ hold, studentId }) {
       <Stepper step={3} />
       <div className="tick" aria-hidden="true">✓</div>
       <h1>ভর্তি নিশ্চিত হয়েছে!</h1>
-      <p className="muted">ভর্তি ফি সফলভাবে জমা হয়েছে। নিচে আপনার ভর্তির রসিদ।</p>
+      <p className="muted">ভর্তি ফি সফলভাবে জমা হয়েছে।</p>
       <dl className="summary">
         <div><dt>ক্লাস ও শিফট</dt><dd>{classLabel(hold.className)}</dd></div>
         <div><dt>আবেদন নম্বর</dt><dd>{hold.holdId}</dd></div>
         <div><dt>জন্ম নিবন্ধন নম্বর</dt><dd>{studentId}</dd></div>
         <div><dt>অবস্থা</dt><dd><span className="badge confirmed">ভর্তি নিশ্চিত</span></dd></div>
       </dl>
-      <div className="row"><a className="btn big" href="#/my">আমার আবেদনসমূহ</a><button className="ghost" onClick={() => window.print()}>রসিদ প্রিন্ট করুন</button></div>
+      <div className="row"><a className="btn big" href="#/my">আমার আবেদনসমূহ</a><a className="btn ghost" href="#/">ক্লাস তালিকা</a></div>
     </section>
   );
 }
@@ -402,6 +400,7 @@ export default function App() {
   const [studentId, setStudentId] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
   const [classes, setClasses] = useState(null);
   const [holds, setHolds] = useState([]);
+  const [holdsLoaded, setHoldsLoaded] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -415,8 +414,8 @@ export default function App() {
   }, []);
 
   const loadHolds = useCallback(async () => {
-    if (!ID_RE.test(studentId)) { setHolds([]); return; }
-    try { setHolds(await api('/me/holds', { studentId })); }
+    if (!ID_RE.test(studentId)) { setHolds([]); setHoldsLoaded(true); return; }
+    try { setHolds(await api('/me/holds', { studentId })); setHoldsLoaded(true); }
     catch (ex) { setError(errorText(ex)); }
   }, [studentId]);
 
@@ -429,9 +428,17 @@ export default function App() {
   // clear old messages when the page changes
   useEffect(() => { setInfo(''); }, [route]);
 
-  const saveStudent = (v) => { localStorage.setItem(STORAGE_KEY, v); setStudentId(v); setError(''); setInfo(''); };
+  const saveStudent = (v) => {
+    localStorage.setItem(STORAGE_KEY, v);
+    if (v !== studentId) { setHolds([]); setHoldsLoaded(false); }
+    setStudentId(v); setError(''); setInfo('');
+  };
+
+  const current = loggedIn && holdsLoaded ? activeHold(holds, now) : null;
+  const lock = !loggedIn ? 'noid' : current ? 'active' : '';
 
   const apply = async (c) => {
+    if (lock) { setError(lock === 'noid' ? 'আগে উপরের ঘরে শিক্ষার্থীর জন্ম নিবন্ধন নম্বর লিখে সংরক্ষণ করুন।' : 'এই শিক্ষার্থীর একটি আবেদন ইতিমধ্যে আছে; একটি জন্ম নিবন্ধন নম্বর দিয়ে একটির বেশি আবেদন করা যায় না।'); return; }
     setError(''); setInfo(''); setBusyId('class:' + c.id);
     try {
       const h = await api(`/classes/${c.id}/holds`, { method: 'POST', studentId });
@@ -460,12 +467,14 @@ export default function App() {
   const holdOf = (id) => holds.find((h) => h.holdId === id);
 
   let page;
+  const needId = <div className="card center"><h2>প্রথমে শিক্ষার্থীর পরিচয় দিন</h2><p className="muted">উপরের ঘরে শিক্ষার্থীর ১৭ সংখ্যার জন্ম নিবন্ধন নম্বর লিখে "সংরক্ষণ করুন" চাপুন।</p></div>;
+  const loadingCard = <p className="muted">লোড হচ্ছে…</p>;
   if (isAdmin) {
     page = <AdminPage classes={classes} onChanged={loadClasses} onError={setError} onInfo={setInfo} />;
-  } else if (!loggedIn) {
-    page = <Gate onSave={saveStudent} />;
-  } else if (seg[0] === 'switch') {
-    page = <Gate initial={studentId} onSave={(v) => { saveStudent(v); go('/'); }} onCancel={() => go('/')} />;
+  } else if (['application', 'pay', 'success', 'my'].includes(seg[0]) && !loggedIn) {
+    page = needId;
+  } else if (['application', 'pay', 'success'].includes(seg[0]) && !holdsLoaded) {
+    page = loadingCard;
   } else if (seg[0] === 'application') {
     page = <StatusPage hold={holdOf(seg[1])} now={now} busyId={busyId} onCancel={cancel} />;
   } else if (seg[0] === 'pay') {
@@ -473,22 +482,20 @@ export default function App() {
   } else if (seg[0] === 'success') {
     page = <SuccessPage hold={holdOf(seg[1])} studentId={studentId} />;
   } else if (seg[0] === 'my') {
-    page = <MyPage holds={holds} now={now} busyId={busyId} onCancel={cancel} />;
+    page = holdsLoaded ? <MyPage holds={holds} now={now} busyId={busyId} onCancel={cancel} /> : loadingCard;
   } else {
-    page = <ClassesPage classes={classes} busyId={busyId} onApply={apply} error={error} />;
+    page = <ClassesPage classes={classes} busyId={busyId} onApply={apply} error={error} lock={lock} current={current} now={now} />;
   }
 
   return (
     <div className={isAdmin ? 'app admin' : 'app'}>
-      <Header admin={isAdmin} studentId={loggedIn ? studentId : ''} route={route} />
+      <Header admin={isAdmin} route={route} />
+      {!isAdmin && <StudentBar studentId={loggedIn ? studentId : ''} onSave={saveStudent} />}
       <main className="wrap">
         <Banner msg={error} onClose={() => setError('')} />
         <Banner msg={info} kind="info" onClose={() => setInfo('')} />
         {page}
       </main>
-      <footer className="foot">
-        <span>© অনলাইন স্কুল ভর্তি পোর্টাল</span>
-      </footer>
     </div>
   );
 }

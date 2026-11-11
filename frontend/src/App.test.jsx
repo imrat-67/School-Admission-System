@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { fmtCountdown, effectiveStatus, HoldCard, parseClassName, classLabel } from './App.jsx';
+import { fmtCountdown, effectiveStatus, activeHold, HoldCard, parseClassName, classLabel } from './App.jsx';
 import { errorText, ApiError } from './api.js';
 
 const NOW = Date.parse('2026-01-01T10:00:00Z');
@@ -46,5 +46,19 @@ describe('class names', () => {
     expect(parseClassName('Class 8 Day Shift')).toEqual({ level: 8, shift: 'Day' });
     expect(classLabel('Class 10 Morning Shift')).toContain('ক্লাস 10');
     expect(classLabel('Something else')).toBe('Something else');
+  });
+});
+
+describe('one student, one application', () => {
+  it('finds a running or confirmed application', () => {
+    expect(activeHold([hold('HELD', '2026-01-01T10:05:00Z')], NOW)).not.toBeNull();
+    expect(activeHold([hold('CONFIRMED', '2026-01-01T09:00:00Z')], NOW)).not.toBeNull();
+  });
+
+  it('ignores expired, time-over and cancelled applications', () => {
+    expect(activeHold([hold('EXPIRED', '2026-01-01T09:00:00Z')], NOW)).toBeNull();
+    expect(activeHold([hold('HELD', '2026-01-01T09:59:00Z')], NOW)).toBeNull();
+    expect(activeHold([hold('CANCELLED', '2026-01-01T10:05:00Z')], NOW)).toBeNull();
+    expect(activeHold([], NOW)).toBeNull();
   });
 });

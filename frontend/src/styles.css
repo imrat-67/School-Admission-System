@@ -84,3 +84,9 @@ th,td{padding:10px 8px;text-align:left;border-bottom:1px solid var(--line);white
 .foot a{color:var(--mut)}
 @media(max-width:720px){.hero,.grid2{grid-template-columns:1fr}.hero h1{font-size:25px}.hold{flex-direction:column;align-items:stretch}.row.nowrap{justify-content:stretch}}
 @media print{.topbar,.foot,.row{display:none}}
+.studentbar{background:#fff;border-bottom:1px solid #e2e8f0}
+.studentbar-in{padding:10px clamp(16px,4vw,56px)}
+.sb-form label{display:block;font-weight:700;margin-bottom:6px}
+.sb-form input{max-width:320px;margin:0}
+.sb-show{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sb-show b{letter-spacing:.5px;font-variant-numeric:tabular-nums}
