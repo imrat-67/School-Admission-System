@@ -1,0 +1,26 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, "Noto Sans Bengali", "Segoe UI", sans-serif; background: #f3f5f9; color: #1c2430; }
+.wrap { max-width: 920px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.5rem; margin: 8px 0 14px; }
+h2 { font-size: 1.1rem; margin: 0 0 10px; }
+.card { background: #fff; border: 1px solid #dde3ee; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+input { flex: 1; min-width: 160px; padding: 9px 10px; border: 1px solid #b9c3d6; border-radius: 8px; font-size: 1rem; }
+button { padding: 9px 14px; border: 0; border-radius: 8px; background: #1d5fd1; color: #fff; font-size: 0.95rem; cursor: pointer; }
+button.secondary { background: #6b7585; }
+button.link { background: none; color: inherit; padding: 0 6px; font-size: 1rem; }
+button:disabled { background: #b8c0cc; cursor: not-allowed; }
+.muted { color: #5d6778; font-size: 0.9rem; margin: 6px 0 0; }
+.field-error { color: #b42318; margin: 6px 0 0; font-size: 0.92rem; }
+.banner { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+.banner.error { background: #fde8e6; color: #8a1c12; border: 1px solid #f3b3ad; }
+.banner.info { background: #e6f4ea; color: #14602b; border: 1px solid #a9d9b8; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #e6ebf3; white-space: nowrap; }
+.hold { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; border: 1px solid #dde3ee; border-radius: 8px; padding: 10px; margin-top: 8px; }
+.hold.held { border-color: #f0c36d; background: #fffaf0; }
+.hold.confirmed { border-color: #8fd0a4; background: #f2fbf5; }
+.hold.expired, .hold.cancelled { background: #f6f6f8; }
+.badge { background: #eef1f7; border-radius: 12px; padding: 2px 8px; font-size: 0.88rem; }
+.timer { margin-top: 4px; }
