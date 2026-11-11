@@ -1,0 +1,44 @@
+# Run everything:  docker compose up --build
+# Frontend: http://localhost:3000   Backend API: http://localhost:8080
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: admission
+      POSTGRES_PASSWORD: admission
+      POSTGRES_DB: admission
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admission -d admission"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DB_CONNECTION_STRING: "Host=db;Port=5432;Database=admission;Username=admission;Password=admission;Maximum Pool Size=200"
+      HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    environment:
+      # URL the BROWSER uses to reach the backend
+      API_URL: "${API_URL:-http://localhost:8080}"
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:

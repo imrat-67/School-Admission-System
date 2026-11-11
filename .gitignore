@@ -1,0 +1,9 @@
+# PRIVATE: assignment PDF + AI hand-off notes must never be public
+claude-memory/
+bin/
+obj/
+node_modules/
+dist/
+.env
+*.user
+.vs/
