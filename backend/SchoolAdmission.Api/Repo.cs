@@ -189,7 +189,7 @@ SELECT id, class_id, student_id,
             ("id", holdId)))
         await using (var r = await q.ExecuteReaderAsync())
         {
-            if (!await r.ReadAsync()) { await tx.RollbackAsync(); return (Outcome.NotFound, null); }
+            if (!await r.ReadAsync()) return (Outcome.NotFound, null); // tx is rolled back on dispose
             classId = r.GetString(0); owner = r.GetString(1); status = r.GetString(2);
             expires = r.GetFieldValue<DateTime>(3); over = r.GetBoolean(4);
         }
@@ -220,7 +220,7 @@ SELECT id, class_id, student_id,
             "SELECT student_id, status, expires_at <= clock_timestamp() FROM holds WHERE id=@id FOR UPDATE", ("id", holdId)))
         await using (var r = await q.ExecuteReaderAsync())
         {
-            if (!await r.ReadAsync()) { await tx.RollbackAsync(); return Outcome.NotFound; }
+            if (!await r.ReadAsync()) return Outcome.NotFound; // tx is rolled back on dispose
             owner = r.GetString(0); status = r.GetString(1); over = r.GetBoolean(2);
         }
         if (owner != studentId) { await tx.RollbackAsync(); return Outcome.Forbidden; }
