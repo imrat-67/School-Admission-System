@@ -34,12 +34,18 @@ HOLD_DURATION_SECONDS=30 docker compose up --build
 
 ## How to use the UI
 
-Everything is done from the browser at http://localhost:3000 (no Postman, no database access). A **student-number box is at the top of every page** (no login).
+Everything is done from the browser (no Postman, no database access). There are two separate parts:
 
-1. **ক্লাস তৈরি (স্কুল অ্যাডমিন)**, `#/admin`: type the class **name** (e.g. `Class 6 Morning Shift`) and the number of seats. A fresh database has no classes, so start here.
-2. **ক্লাস তালিকা**, the home page: every class with total / held / confirmed / available seats (refreshes by itself every few seconds) and an **আবেদন করুন** button. First type the student's 17-digit birth registration number in the box at the top and press **সংরক্ষণ করুন** (it is remembered in the browser; **নম্বর পরিবর্তন** switches to another student).
-3. **আবেদনের অবস্থা**: status, live countdown to expiry, **ভর্তি ফি দিন** and **বাতিল**. When the time is over the status changes to "সময় শেষ" and the pay button is disabled, without a reload. Paying is simulated (it simply confirms the admission).
-4. **আমার আবেদন**: all applications of this student; they are still there after a page refresh or after closing the browser.
+**School admin: http://localhost:3000/#/admin** (no login, as the spec has no login). On a fresh database there are no classes yet, so start here:
+- **সব ক্লাস যোগ করুন** creates Class 6 to 10, each with Morning and Day shift (10 classes) in one click, or add one class (class + shift + seats).
+- The table lists total / held / confirmed / available seats. **সম্পাদনা** edits a class (seats cannot go below the seats already held or confirmed), **মুছুন** closes a class.
+
+**Guardian: http://localhost:3000**
+1. Type the student's 17-digit birth registration number in the box at the top and press **সংরক্ষণ করুন** (it is remembered in the browser; **নম্বর পরিবর্তন** switches to another student).
+2. Class list: pick a class tab, see total / held / confirmed / available seats (auto-refreshes every few seconds), press **আবেদন করুন**.
+3. Application status page: live countdown, **ভর্তি ফি দিন** (summary page, then **ফি জমা নিশ্চিত করুন**, then a success page) and **বাতিল**. When the time is over the status changes to expired and the pay button is disabled, without a reload.
+4. **আমার আবেদন**: all applications of this student, still there after a page refresh or after closing the browser.
+5. In the UI, a student who already has a running or confirmed application gets a dialog instead of a second application (see ASSUMPTIONS.md, point 3).
 
 ## API
 
@@ -56,19 +62,20 @@ All requests/responses are JSON. Student identity is the `X-Student-Id` header (
 | DELETE | `/holds/{holdId}` | 204 |
 | GET | `/me/holds` | 200 list |
 | GET | `/health` | extra, 200 `{status:"ok"}` |
+| PUT / DELETE | `/classes/{classId}` | extra (admin edit / close), see ASSUMPTIONS.md |
 
 Errors are always 4xx with `{ "error": "...", "code": "..." }` (never a 500 for bad input).
 
 ## Tests
 
-**Backend** (xUnit, run against a real PostgreSQL; 20 tests, including concurrency tests, a two-backend test, expiry, idempotent confirm and bad-input tests). Needs only Docker:
+**Backend** (xUnit, run against a real PostgreSQL; 22 tests, including concurrency tests, a two-backend test, expiry, idempotent confirm and bad-input tests). Needs only Docker:
 
 ```bash
 docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from tests
 docker compose -f docker-compose.test.yml down -v
 ```
 
-**Frontend** (bonus; Vitest + React Testing Library, 17 tests: countdown, the pay button switching off by itself after expiry, friendly error texts, class list, create-class form, Bengali digits). Needs Node 20+:
+**Frontend** (bonus; Vitest + React Testing Library, 9 tests, see `frontend/src/App.test.jsx`). Needs Node 20+:
 
 ```bash
 cd frontend

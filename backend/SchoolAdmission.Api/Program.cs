@@ -78,6 +78,7 @@ IResult OutcomeError(Outcome o) => o switch
     Outcome.Expired => Err(409, "HOLD_EXPIRED", "The hold has expired."),
     Outcome.Cancelled => Err(409, "HOLD_CANCELLED", "The application was cancelled."),
     Outcome.Confirmed => Err(409, "ALREADY_CONFIRMED", "A confirmed admission cannot be cancelled."),
+    Outcome.SeatsBelowUsed => Err(409, "SEATS_BELOW_USED", "totalSeats cannot be less than the seats already held or confirmed."),
     _ => Err(500, "SERVER_ERROR", "Unexpected server error.")
 };
 
@@ -91,6 +92,25 @@ app.MapPost("/classes", async (CreateClassRequest? body, Repo repo) =>
         return Err(400, "INVALID_SEATS", "totalSeats must be a whole number between 1 and 100000.");
     var row = await repo.CreateClassAsync(name, body.TotalSeats.Value);
     return Results.Json(new { id = row.Id, name = row.Name, totalSeats = row.TotalSeats }, statusCode: 201);
+});
+
+// Admin extras (not in the spec's 8 endpoints, the 8 contracts are untouched)
+app.MapPut("/classes/{classId}", async (string classId, CreateClassRequest? body, Repo repo) =>
+{
+    var name = body?.Name?.Trim();
+    if (string.IsNullOrEmpty(name)) return Err(400, "INVALID_NAME", "name is required.");
+    if (name.Length > 200 || name.Any(char.IsControl))
+        return Err(400, "INVALID_NAME", "name must be at most 200 characters and contain no control characters.");
+    if (body!.TotalSeats is null || body.TotalSeats < 1 || body.TotalSeats > 100000)
+        return Err(400, "INVALID_SEATS", "totalSeats must be a whole number between 1 and 100000.");
+    var (o, row) = await repo.UpdateClassAsync(classId, name, body.TotalSeats.Value);
+    return o == Outcome.Ok ? Results.Ok(new { id = row!.Id, name = row.Name, totalSeats = row.TotalSeats }) : OutcomeError(o);
+});
+
+app.MapDelete("/classes/{classId}", async (string classId, Repo repo) =>
+{
+    var o = await repo.DeleteClassAsync(classId);
+    return o == Outcome.Ok ? Results.NoContent() : OutcomeError(o);
 });
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
