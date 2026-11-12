@@ -34,11 +34,18 @@ HOLD_DURATION_SECONDS=30 docker compose up --build
 
 ## How to use the UI
 
-1. Type the student's 17-digit birth registration number in the box at the top (it is remembered in the browser).
-2. Admin part: create a class (name + total seats).
-3. Class list: see total / held / confirmed / available seats (auto-refreshes every few seconds). Press **আবেদন করুন** to apply.
-4. Application status: live countdown, **ভর্তি ফি দিন** (confirm) and **বাতিল** (cancel).
-5. My applications: all applications of this student, still there after a page refresh.
+There are two separate parts:
+
+**School admin: http://localhost:3000/#/admin** (no login, as the spec asks). On a fresh database there are no classes yet, so start here:
+- **সব ক্লাস যোগ করুন** creates Class 6 to 10, each with Morning and Day shift (10 classes) in one click, or add one class (class + shift + seats).
+- The table lists total / held / confirmed / available seats. **সম্পাদনা** edits a class (seats cannot go below the seats already held or confirmed), **মুছুন** closes a class.
+
+**Guardian: http://localhost:3000**
+1. Type the student's 17-digit birth registration number in the box at the top and press **সংরক্ষণ করুন** (it is remembered in the browser; **নম্বর পরিবর্তন** switches to another student).
+2. Class list: pick a class tab, see total / held / confirmed / available seats (auto-refreshes every few seconds), press **আবেদন করুন**. A guardian page has no way to create classes.
+3. Application status page: live countdown, **ভর্তি ফি দিন** (opens a summary page, then **ফি জমা নিশ্চিত করুন**, then a success page) and **বাতিল**. When time is over the status changes to expired and the pay button is disabled without a reload.
+4. **আমার আবেদন**: all applications of this student, still there after a page refresh or after closing the browser.
+5. In the UI a student with a running or confirmed application cannot start another one (see ASSUMPTIONS.md, point 3).
 
 ## API
 
@@ -74,10 +81,10 @@ Applying runs in one database transaction that first locks the class row (`SELEC
 
 See also: [ASSUMPTIONS.md](ASSUMPTIONS.md), [AI_USAGE.md](AI_USAGE.md).
 
-Frontend tests (bonus, Vitest + React Testing Library: countdown, auto-disable of the pay button after expiry, friendly error texts). Needs Node 20+:
+Frontend tests (bonus, Vitest + React Testing Library: countdown, auto-disable of the pay button after expiry, friendly error texts, the "already applied" dialog, class-name helpers). Needs Node 20+:
 
 ```bash
 cd frontend
 npm install
-npm test
+NODE_ENV=test npm test
 ```
