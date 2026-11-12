@@ -64,21 +64,41 @@ describe('one student, one application', () => {
 });
 
 describe('apply when the student already has an application', () => {
-  it('opens a dialog that tells the user to change the birth registration number', async () => {
+  const future = () => new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const reply = (data, status = 200) => Promise.resolve({ ok: status < 400, status, headers: { get: () => null }, json: () => Promise.resolve(data) });
+  const classes = [
+    { id: 'c_1', name: 'Class 6 Morning Shift', totalSeats: 10, heldSeats: 1, confirmedSeats: 0, availableSeats: 9 },
+    { id: 'c_2', name: 'Class 7 Day Shift', totalSeats: 10, heldSeats: 0, confirmedSeats: 0, availableSeats: 10 }
+  ];
+  const setup = () => {
     localStorage.setItem('studentId', '20120101234567890');
-    const future = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-    const reply = (data) => Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve(data) });
-    vi.stubGlobal('fetch', vi.fn((url) => String(url).endsWith('/me/holds')
-      ? reply([{ holdId: 'h_1', classId: 'c_1', className: 'Class 6 Morning Shift', status: 'HELD', expiresAt: future }])
-      : reply([{ id: 'c_2', name: 'Class 7 Day Shift', totalSeats: 10, heldSeats: 0, confirmedSeats: 0, availableSeats: 10 }])));
+    vi.stubGlobal('fetch', vi.fn((url, opts) => {
+      const u = String(url);
+      if (u.endsWith('/me/holds')) return reply([{ holdId: 'h_1', classId: 'c_1', className: 'Class 6 Morning Shift', status: 'HELD', expiresAt: future() }]);
+      if (opts && opts.method === 'POST') return reply({ holdId: 'h_2', classId: 'c_2', status: 'HELD', expiresAt: future() }, 201);
+      return reply(classes);
+    }));
     window.location.hash = '#/';
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: /ক্লাস 7/ }));
+  };
+  const posted = () => fetch.mock.calls.filter(([, o]) => o && o.method === 'POST');
+  const loaded = async () => { await screen.findByRole('tab', { name: /ক্লাস 7/ }); await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/me/holds'), expect.anything())); await new Promise((r) => setTimeout(r, 50)); };
+
+  it('asks first when the same class is applied to again', async () => {
+    setup(); await loaded();
     const btn = await screen.findByRole('button', { name: 'আবেদন করুন' });
-    await waitFor(() => expect(screen.getByText(/নম্বর পরিবর্তন করুন/, { selector: 'button.link' })).toBeInTheDocument());
     fireEvent.click(btn);
-    expect(await screen.findByRole('dialog')).toHaveTextContent('ইতিমধ্যে আবেদন করেছে');
-    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/holds'), expect.objectContaining({ method: 'POST' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('এই ক্লাসে ইতিমধ্যে আবেদন করা আছে');
+    expect(posted()).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('lets the student apply to a different class', async () => {
+    setup(); await loaded();
+    fireEvent.click(screen.getByRole('tab', { name: /ক্লাস 7/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'আবেদন করুন' }));
+    await waitFor(() => expect(posted()).toHaveLength(1));
+    expect(screen.queryByRole('dialog')).toBeNull();
     vi.unstubAllGlobals();
   });
 });

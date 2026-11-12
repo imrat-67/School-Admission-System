@@ -28,10 +28,10 @@ export const fmtCountdown = (ms) => {
 export const effectiveStatus = (h, now) =>
   h.status === 'HELD' && Date.parse(h.expiresAt) <= now ? 'EXPIRED' : h.status;
 
-// one birth registration number = one application: a student with a running (HELD, not expired)
-// or confirmed application cannot start another one (UI rule; the API itself only limits per class)
-export const activeHold = (holds, now) =>
-  (holds || []).find((h) => ['HELD', 'CONFIRMED'].includes(effectiveStatus(h, now))) || null;
+// a student with a running (HELD, not expired) or confirmed application in a class cannot apply to the SAME class again
+// (the API says 409; the UI asks first). Without classId it looks at all classes.
+export const activeHold = (holds, now, classId) =>
+  (holds || []).find((h) => (!classId || h.classId === classId) && ['HELD', 'CONFIRMED'].includes(effectiveStatus(h, now))) || null;
 
 export const parseClassName = (name) => {
   const m = /^Class\s+(\d+)\s+(Morning|Day)\s+Shift$/i.exec((name || '').trim());
@@ -344,8 +344,7 @@ const SEATS_ERR = 'আসন সংখ্যা ১ থেকে ১,০০,০�
 const mkName = (level, shift) => `Class ${level} ${shift} Shift`;
 
 function AdminPage({ classes, onChanged, onError, onInfo }) {
-  const [level, setLevel] = useState(6);
-  const [shift, setShift] = useState('Morning');
+  const [name, setName] = useState('');
   const [seats, setSeats] = useState('60');
   const [bulkSeats, setBulkSeats] = useState('60');
   const [busy, setBusy] = useState(false);
@@ -357,11 +356,13 @@ function AdminPage({ classes, onChanged, onError, onInfo }) {
 
   const create = async (e) => {
     e.preventDefault();
+    const nm = name.trim();
+    if (!nm) return setErr('ক্লাসের নাম লিখুন।');
+    if (nm.length > 200) return setErr('ক্লাসের নাম সর্বোচ্চ ২০০ অক্ষরের হতে পারে।');
     if (!seatsOk(seats)) return setErr(SEATS_ERR);
-    const name = mkName(level, shift);
-    if (isDup(name)) return setErr('এই ক্লাস ও শিফট আগে থেকেই তৈরি করা আছে।');
+    if (isDup(nm)) return setErr('এই নামের ক্লাস আগে থেকেই তৈরি করা আছে।');
     setErr(''); setBusy(true);
-    try { await api('/classes', { method: 'POST', body: { name, totalSeats: Number(seats) } }); onInfo(`"${classLabel(name)}" তৈরি হয়েছে।`); }
+    try { await api('/classes', { method: 'POST', body: { name: nm, totalSeats: Number(seats) } }); setName(''); onInfo(`"${classLabel(nm)}" তৈরি হয়েছে।`); }
     catch (ex) { onError(errorText(ex)); } finally { setBusy(false); onChanged(); }
   };
 
@@ -422,10 +423,8 @@ function AdminPage({ classes, onChanged, onError, onInfo }) {
       <div className="grid2">
         <form className="card" onSubmit={create}>
           <h2>নতুন ক্লাস যোগ করুন</h2>
-          <label htmlFor="lv">শ্রেণি</label>
-          <select id="lv" value={level} onChange={(e) => setLevel(Number(e.target.value))}>{CLASS_LEVELS.map((l) => <option key={l} value={l}>ক্লাস {l}</option>)}</select>
-          <label htmlFor="sh">শিফট</label>
-          <select id="sh" value={shift} onChange={(e) => setShift(e.target.value)}>{SHIFTS.map((s) => <option key={s.key} value={s.key}>{s.bn}</option>)}</select>
+          <label htmlFor="cn">ক্লাসের নাম</label>
+          <input id="cn" placeholder="যেমন: Class 6 Morning Shift" value={name} onChange={(e) => setName(e.target.value)} />
           <label htmlFor="st">মোট আসন</label>
           <input id="st" inputMode="numeric" value={seats} onChange={(e) => setSeats(e.target.value)} />
           {err && <p className="field-error" role="alert">{err}</p>}
@@ -482,6 +481,7 @@ export default function App() {
   const [info, setInfo] = useState('');
   const [busyId, setBusyId] = useState('');
   const [dialog, setDialog] = useState('');
+  const [dupHold, setDupHold] = useState(null);
   const [editToken, setEditToken] = useState(0);
   const now = useNow();
   const isAdmin = route.startsWith('/admin');
@@ -513,11 +513,13 @@ export default function App() {
     setStudentId(v); setError(''); setInfo('');
   };
 
-  const current = loggedIn && holdsLoaded ? activeHold(holds, now) : null;
-  const lock = !loggedIn ? 'noid' : current ? 'active' : '';
+  const current = null;
+  const lock = !loggedIn ? 'noid' : '';
 
   const apply = async (c) => {
     if (lock) { setDialog(lock); return; }
+    const dup = holdsLoaded ? activeHold(holds, now, c.id) : null;
+    if (dup) { setDupHold(dup); setDialog('active'); return; }
     setError(''); setInfo(''); setBusyId('class:' + c.id);
     try {
       const h = await api(`/classes/${c.id}/holds`, { method: 'POST', studentId });
@@ -587,13 +589,13 @@ export default function App() {
           <div className="row"><button className="big" onClick={changeId}>নম্বর দিন</button><button className="ghost big" onClick={() => setDialog('')}>বন্ধ করুন</button></div>
         </Modal>
       )}
-      {dialog === 'active' && current && (
-        <Modal title="এই শিক্ষার্থী ইতিমধ্যে আবেদন করেছে" onClose={() => setDialog('')}>
-          <p><b>{classLabel(current.className)}</b>-এ আবেদন {effectiveStatus(current, now) === 'CONFIRMED' ? 'নিশ্চিত হয়েছে' : 'চলমান আছে'}। একটি জন্ম নিবন্ধন নম্বর (একজন শিক্ষার্থী) দিয়ে একটির বেশি আবেদন করা যায় না।</p>
-          <p>অন্য শিক্ষার্থীর জন্য নতুন আবেদন করতে নম্বর পরিবর্তন করুন।</p>
+      {dialog === 'active' && dupHold && (
+        <Modal title="এই ক্লাসে ইতিমধ্যে আবেদন করা আছে" onClose={() => setDialog('')}>
+          <p><b>{classLabel(dupHold.className)}</b>-এ এই শিক্ষার্থীর আবেদন {effectiveStatus(dupHold, now) === 'CONFIRMED' ? 'নিশ্চিত হয়েছে' : 'চলমান আছে'}। একই ক্লাসে একটির বেশি আবেদন করা যায় না।</p>
+          <p>অন্য শিক্ষার্থীর জন্য আবেদন করতে নম্বর পরিবর্তন করুন।</p>
           <div className="row">
             <button className="big" onClick={changeId}>নম্বর পরিবর্তন করুন</button>
-            <button className="ghost big" onClick={() => { setDialog(''); go('/application/' + current.holdId); }}>আবেদন দেখুন</button>
+            <button className="ghost big" onClick={() => { setDialog(''); go('/application/' + dupHold.holdId); }}>আবেদন দেখুন</button>
           </div>
         </Modal>
       )}

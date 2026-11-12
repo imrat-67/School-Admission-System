@@ -37,7 +37,7 @@ HOLD_DURATION_SECONDS=30 docker compose up --build
 Everything is done from the browser (no Postman, no database access). There are two separate parts:
 
 **School admin: http://localhost:3000/#/admin** (no login, as the spec has no login). On a fresh database there are no classes yet, so start here:
-- **সব ক্লাস যোগ করুন** creates Class 6 to 10, each with Morning and Day shift (10 classes) in one click, or add one class (class + shift + seats).
+- **সব ক্লাস যোগ করুন** creates Class 6 to 10, each with Morning and Day shift (10 classes) in one click, or add one class by typing its name and seats.
 - The table lists total / held / confirmed / available seats. **সম্পাদনা** edits a class (seats cannot go below the seats already held or confirmed), **মুছুন** closes a class.
 
 **Guardian: http://localhost:3000**
@@ -45,7 +45,7 @@ Everything is done from the browser (no Postman, no database access). There are 
 2. Class list: pick a class tab, see total / held / confirmed / available seats (auto-refreshes every few seconds), press **আবেদন করুন**.
 3. Application status page: live countdown, **ভর্তি ফি দিন** (summary page, then **ফি জমা নিশ্চিত করুন**, then a success page) and **বাতিল**. When the time is over the status changes to expired and the pay button is disabled, without a reload.
 4. **আমার আবেদন**: all applications of this student, still there after a page refresh or after closing the browser.
-5. In the UI, a student who already has a running or confirmed application gets a dialog instead of a second application (see ASSUMPTIONS.md, point 3).
+5. If the student already has a running or confirmed application in a class, clicking **আবেদন করুন** for the same class shows a dialog (the API gives 409); other classes are not affected.
 
 ## API
 
@@ -75,7 +75,7 @@ docker compose -f docker-compose.test.yml up --build --abort-on-container-exit -
 docker compose -f docker-compose.test.yml down -v
 ```
 
-**Frontend** (bonus; Vitest + React Testing Library, 9 tests, see `frontend/src/App.test.jsx`). Needs Node 20+:
+**Frontend** (bonus; Vitest + React Testing Library, 10 tests, see `frontend/src/App.test.jsx`). Needs Node 20+:
 
 ```bash
 cd frontend
