@@ -87,6 +87,6 @@ sh scripts/two-backend-check.sh      # parallel applications to :8080 and :8081;
 
 ## How seats stay safe (short)
 
-Applying runs in one database transaction that first locks the class row (`SELECT ... FOR UPDATE`), then counts active holds + confirmed seats, then inserts. So many students applying at the same moment are handled one at a time per class and `held + confirmed <= totalSeats` always holds. Expiry uses the database clock (`expires_at > now()`), so an expired hold stops counting immediately without any API call; a background job also marks old rows `EXPIRED`.
+Applying runs in one database transaction that first locks the class row (`SELECT ... FOR UPDATE`), then counts active holds + confirmed seats, then inserts. So many students applying at the same moment are handled one at a time per class and `held + confirmed <= totalSeats` always holds. Expiry uses the database clock (`expires_at > clock_timestamp()`), so an expired hold stops counting immediately without any API call; a background job also marks old rows `EXPIRED`.
 
 See also: [ASSUMPTIONS.md](ASSUMPTIONS.md) (including how two processes stay safe) and [AI_USAGE.md](AI_USAGE.md).
