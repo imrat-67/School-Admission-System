@@ -1,0 +1,15 @@
+# Bonus (spec 1.6): a SECOND backend process on port 8081, using the SAME database as the first one (port 8080).
+#   docker compose -f docker-compose.yml -f docker-compose.two-backends.yml up --build -d
+#   sh scripts/two-backend-check.sh
+services:
+  backend2:
+    build: ./backend
+    environment:
+      DB_CONNECTION_STRING: "Host=db;Port=5432;Database=admission;Username=admission;Password=admission;Maximum Pool Size=50"
+      HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
+    ports:
+      - "8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
