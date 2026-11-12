@@ -23,5 +23,20 @@
 - A confusing admin form: one form was used for both creating and editing a class. Editing is now a separate dialog.
 - The "বাতিল" button was shown disabled on applications that could not be cancelled, which looked broken. It now appears only for a running application.
 - I decided that one birth registration number should not hold seats in several classes at the same time. The spec only limits this per class, so the rule was added in the UI only and the API stays exactly as the spec says (see ASSUMPTIONS.md).
-- Admin edit/close class endpoints were added on top of the 8 required endpoints; they are covered by 2 extra backend tests (15 in total).
+- Admin edit/close class endpoints were added on top of the 8 required endpoints (later removed, see below).
+
+## Second review and fixes, after the deadline (12 Nov)
+These changes were made **after the submission deadline** (11 Nov 23:59:59); the commit times show it. They are listed here so the history stays honest.
+
+An independent review by another Claude session (it cloned the repo, ran it with Docker, load-tested it and clicked through the UI) and a new check of the PDF page images found these problems. All were AI-made or AI-missed:
+- **A class name containing a NUL character gave a 500.** Fixed: control characters give 400, and database "data exception" errors are mapped to 400.
+- **Bengali digits were accepted as a student id** (the .NET regex `\d` matches them). Fixed with `[0-9]{17}`; the UI converts Bengali digits to 0-9 instead.
+- **Two backend processes under load gave some 500s**: each process allowed 200 connections, together more than PostgreSQL's 300. Pool size is now 50. Checked again with 1200 parallel requests on two processes: exactly the seat count succeeded, no 5xx.
+- **The countdown could not use the server clock**, because CORS did not expose the `Date` header. Fixed.
+- **`totalSeats` given as a string was accepted.** Fixed (strict JSON numbers).
+- **`GET /holds/{id}` returned the student id** (a child's registration number). Removed from that response.
+- **The PDF text extraction was incomplete.** It dropped the first Bonus bullet (two backend processes on one database, explained in ASSUMPTIONS.md) and contained a line about "4xx, never 500" that is not visible on the page. I caught this only by rendering the PDF pages to images and reading them. So the Bonus part (a `docker-compose.two-backends.yml`, `scripts/two-backend-check.sh`, a two-instance test, an explanation in ASSUMPTIONS.md) was added late.
+- **Things beyond the PDF were removed:** the unauthenticated admin edit/close endpoints, the UI rule that blocked a student from applying in other classes, the extra payment and success pages, and the fixed "Class 6-10 / Morning-Day" grid. The create-class screen now has a free **name** field, as the PDF says ("Class-এর নাম আর seat সংখ্যা").
+- ASSUMPTIONS.md was shortened and made consistent (it had contradicting points).
+- Tests: backend 20, frontend 17 (both pass).
 

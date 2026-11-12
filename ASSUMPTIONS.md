@@ -1,19 +1,27 @@
 # Assumptions
 
-1. **Student id**: `X-Student-Id` must be exactly 17 digits (birth registration number). Anything else gives 400. No login, no student table; the id is just stored with each application.
-2. **Class = one shift.** Class names are not required to be unique. Name must be non-empty (max 200 chars) and `totalSeats` a whole number from 1 to 100000; otherwise 400.
-3. **One student, one application (UI rule).** The API limits one active or confirmed seat per class, as the spec says, and the same id may technically apply in other classes. Because a birth registration number belongs to one student, the UI goes further: while a student has a running (not expired) or confirmed application, the "আবেদন করুন" buttons are disabled for every class. After a cancel or expiry the student may apply again. A second apply to the same class gives 409.
-4. **Expiry** is decided by the database clock (`expires_at > now()`), so an expired hold stops counting at once. Confirming an expired hold gives 409 and the row becomes EXPIRED. Hold duration comes from `HOLD_DURATION_SECONDS` (default 600) and applies to new holds only.
-5. **Confirm** is idempotent: confirming an already CONFIRMED application by its owner returns 200 and the seat is counted once. Another student's confirm gives 403. Confirming a CANCELLED or EXPIRED application gives 409.
-6. **Cancel** (`DELETE /holds/{id}`) works on the student's own HELD application (204, seat returns). Cancelling an already CANCELLED one is also 204 (safe to repeat); an expired one gives 409 `HOLD_EXPIRED`. A CONFIRMED admission cannot be cancelled (409) because the fee is considered paid. Another student's id gives 403.
-7. **`GET /holds/{id}`** needs no header (the spec lists no header for it); hold ids are random, so they are hard to guess. `/me/holds` needs the header.
-8. **Payment** is simulated: pressing "ভর্তি ফি দিন" simply calls confirm.
-9. **Admin**: there is no admin login; the admin page (`#/admin`) is open to everyone, as the spec asks for no authentication. The guardian pages have no way to create, edit or delete a class.
-10. **IDs** are short random strings (`c_...`, `h_...`).
-11. **Seat counts**: `heldSeats` counts only non-expired HELD rows; `availableSeats = totalSeats - heldSeats - confirmedSeats`.
-12. **Frontend** stores the student id in the browser's localStorage so applications are still visible after refresh or reopening the browser. The browser talks to the backend directly at `API_URL` (default `http://localhost:8080`); backend allows CORS.
-13. **Ports**: backend 8080, frontend 3000, database is not exposed to the host.
-14. **Admin edit/delete (extra, not in the spec's 8 endpoints; those are unchanged).** `PUT /classes/{id}` changes name and seats, but seats can never go below the held + confirmed seats (409 `SEATS_BELOW_USED`), so rule 1 still holds. `DELETE /classes/{id}` closes a class (soft delete): it disappears from the lists, takes no new applications (404), running applications are cancelled, and CONFIRMED admissions are kept in the database. This lets the admin clear old classes when a new admission round starts.
-15. **Applications of one student**: buttons only appear when they make sense: "বাতিল" only for a running application; "ভর্তি ফি দিন" is shown but disabled once the time is over (spec 2.5).
-16. **Apply while the student already has an application**: the "আবেদন করুন" buttons stay clickable; clicking shows a dialog (এই শিক্ষার্থী ইতিমধ্যে আবেদন করেছে) with "নম্বর পরিবর্তন করুন" (focuses the number box at the top) and "আবেদন দেখুন". The spec has no application "delete" other than cancel (`DELETE /holds/{id}`, the "বাতিল" button), so nothing else was added for applications.
-17. **Admin screen**: "নতুন ক্লাস যোগ করুন" is only for creating; "সম্পাদনা" in the class table opens a dialog for editing that class, so create and edit are never mixed in one form.
+Where the assignment is silent I decided the following (short reasons included).
+
+1. **Student id.** `X-Student-Id` must be exactly 17 ASCII digits (the birth registration number), otherwise 400. There is no login and no student table; the id is stored with each application. The UI turns Bengali digits typed by parents into 0-9, so one student never appears under two different ids.
+2. **A class is one shift.** The name is free text (non-empty, at most 200 characters, no control characters) and does not have to be unique. `totalSeats` is a whole number from 1 to 100000. Anything else gives 400, never 500.
+3. **One application per student *per class*** (exactly what the spec says). The same student may hold seats in different classes; a second apply to the same class gives 409.
+4. **Expiry** is decided by the database clock (`expires_at > clock_timestamp()`), so an expired hold stops counting at once and no API call is needed. `HOLD_DURATION_SECONDS` (default 600) applies to new holds.
+5. **Confirm** is idempotent: confirming an already confirmed application of the same student returns 200 and the seat is counted once. Another student's id gives 403; an expired or cancelled application gives 409.
+6. **Cancel** (`DELETE /holds/{id}`): own running application → 204 and the seat returns; repeating it is also 204; an expired one gives 409; a confirmed admission cannot be cancelled (409) because the fee is considered paid; another student's id gives 403.
+7. **`GET /holds/{id}`** needs no header (the spec lists none) and does not return `studentId`, because it is a child's registration number. `/me/holds` needs the header.
+8. **Payment is simulated.** "ভর্তি ফি দিন" directly confirms the application.
+9. **No admin login** (the spec has no login). The "ক্লাস তৈরি" screen is open to everyone and only creates classes; the spec has no edit/delete for classes, so none was built.
+10. `availableSeats = totalSeats − heldSeats − confirmedSeats`, where `heldSeats` counts only HELD applications that have not expired. IDs are short random strings (`c_…`, `h_…`).
+11. The student id is kept in the browser's localStorage so applications are still visible after a refresh or after reopening the browser. The browser calls the backend directly at `API_URL`, so the backend allows CORS (and exposes the `Date` header so the countdown uses the server's clock).
+
+## Bonus: two backend processes on one database
+
+Nothing about seats is kept in the memory of a backend process, so any number of processes can run side by side. PostgreSQL is the single source of truth and does the locking:
+
+- **Apply:** one transaction first locks the class row (`SELECT … FOR UPDATE`), then counts held + confirmed seats, then inserts. A request from the other process has to wait for that lock, so for one class the check-and-insert steps of all requests run one after another, whichever process they came from. `held + confirmed` can therefore never exceed `totalSeats`.
+- **One application per student per class:** also enforced by the database (a partial unique index), not only by code.
+- **Confirm:** locks the application row, so repeated or parallel confirms count the seat only once.
+- **Expiry** uses the database clock, never a process clock, so two processes cannot disagree about whether a hold has expired.
+- **Connections:** each process uses at most 50 connections, and PostgreSQL allows 300, so two (or more) processes do not run out of connections.
+
+How I checked it: `docker-compose.two-backends.yml` starts a second backend on port 8081; `scripts/two-backend-check.sh` sends hundreds of parallel applications alternately to ports 8080 and 8081, and exactly `totalSeats` of them succeed. The backend test `Two_backend_instances_on_one_database_never_exceed_the_seat_limit` does the same with two separate application hosts, each with its own connection pool.
