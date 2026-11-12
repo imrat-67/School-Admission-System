@@ -161,4 +161,39 @@ public class AdmissionApiTests : IClassFixture<ApiFixture>
         Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Post, "/holds/nope/confirm", NewStudent())).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Delete, "/holds/nope", NewStudent())).StatusCode);
     }
+
+    [Fact]
+    public async Task Admin_can_edit_a_class_but_never_below_the_seats_already_used()
+    {
+        var cid = await NewClass(5);
+        Assert.Equal(HttpStatusCode.Created, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
+        var low = await _http.PutAsJsonAsync("/classes/" + cid, new { name = "Class 7 Day Shift", totalSeats = 1 });
+        Assert.Equal(HttpStatusCode.Conflict, low.StatusCode);
+        var ok = await _http.PutAsJsonAsync("/classes/" + cid, new { name = "Class 7 Day Shift", totalSeats = 8 });
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        var s = await Stats(cid);
+        Assert.Equal("Class 7 Day Shift", s.GetProperty("name").GetString());
+        Assert.Equal(8, s.GetProperty("totalSeats").GetInt32());
+        Assert.Equal(6, s.GetProperty("availableSeats").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, (await _http.PutAsJsonAsync("/classes/" + cid, new { name = "", totalSeats = 3 })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.PutAsJsonAsync("/classes/nope", new { name = "X", totalSeats = 3 })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleting_a_class_hides_it_stops_applications_and_keeps_confirmed_admissions()
+    {
+        var cid = await NewClass(3);
+        var a = NewStudent(); var b = NewStudent();
+        var hA = (await Json(await Send(HttpMethod.Post, $"/classes/{cid}/holds", a))).GetProperty("holdId").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await Send(HttpMethod.Post, $"/holds/{hA}/confirm", a)).StatusCode);
+        var hB = (await Json(await Send(HttpMethod.Post, $"/classes/{cid}/holds", b))).GetProperty("holdId").GetString()!;
+        Assert.Equal(HttpStatusCode.NoContent, (await _http.DeleteAsync("/classes/" + cid)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync("/classes/" + cid)).StatusCode);
+        Assert.DoesNotContain((await Json(await _http.GetAsync("/classes"))).EnumerateArray(), c => c.GetProperty("id").GetString() == cid);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.DeleteAsync("/classes/" + cid)).StatusCode);
+        Assert.Equal("CONFIRMED", (await Json(await _http.GetAsync("/holds/" + hA))).GetProperty("status").GetString());
+        Assert.Equal("CANCELLED", (await Json(await _http.GetAsync("/holds/" + hB))).GetProperty("status").GetString());
+    }
 }

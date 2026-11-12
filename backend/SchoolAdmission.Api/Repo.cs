@@ -2,7 +2,7 @@ using Npgsql;
 
 namespace SchoolAdmission.Api;
 
-public enum Outcome { Ok, NotFound, Forbidden, SeatsFull, Duplicate, Expired, Cancelled, Confirmed }
+public enum Outcome { Ok, NotFound, Forbidden, SeatsFull, Duplicate, Expired, Cancelled, Confirmed, SeatsBelowUsed }
 
 public record ClassRow(string Id, string Name, int TotalSeats);
 public record ClassStats(string Id, string Name, int TotalSeats, int HeldSeats, int ConfirmedSeats, int AvailableSeats);
@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS classes(
   name text NOT NULL,
   total_seats int NOT NULL CHECK (total_seats > 0),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp());
+-- admin 'delete' only hides a class (soft delete) so confirmed admissions are never lost
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 CREATE TABLE IF NOT EXISTS holds(
   id text PRIMARY KEY,
   class_id text NOT NULL REFERENCES classes(id),
@@ -104,7 +106,7 @@ ORDER BY c.created_at, c.id";
     public async Task<List<ClassStats>> ListClassesAsync()
     {
         await using var c = await _ds.OpenConnectionAsync();
-        await using var cmd = Cmd(c, null, StatsSql.Replace("{WHERE}", ""));
+        await using var cmd = Cmd(c, null, StatsSql.Replace("{WHERE}", "WHERE c.deleted_at IS NULL"));
         await using var r = await cmd.ExecuteReaderAsync();
         var list = new List<ClassStats>();
         while (await r.ReadAsync()) list.Add(ReadStats(r));
@@ -114,9 +116,45 @@ ORDER BY c.created_at, c.id";
     public async Task<ClassStats?> GetClassAsync(string id)
     {
         await using var c = await _ds.OpenConnectionAsync();
-        await using var cmd = Cmd(c, null, StatsSql.Replace("{WHERE}", "WHERE c.id = @id"), ("id", id));
+        await using var cmd = Cmd(c, null, StatsSql.Replace("{WHERE}", "WHERE c.id = @id AND c.deleted_at IS NULL"), ("id", id));
         await using var r = await cmd.ExecuteReaderAsync();
         return await r.ReadAsync() ? ReadStats(r) : null;
+    }
+
+    /// <summary>Admin edit. Seats can never go below what is already held or confirmed (rule 1).</summary>
+    public async Task<(Outcome, ClassRow?)> UpdateClassAsync(string id, string name, int totalSeats)
+    {
+        await using var c = await _ds.OpenConnectionAsync();
+        await using var tx = await c.BeginTransactionAsync();
+        await using (var q = Cmd(c, tx, "SELECT 1 FROM classes WHERE id=@id AND deleted_at IS NULL FOR UPDATE", ("id", id)))
+            if (await q.ExecuteScalarAsync() is null) { await tx.RollbackAsync(); return (Outcome.NotFound, null); }
+        await using (var e = Cmd(c, tx,
+            "UPDATE holds SET status='EXPIRED' WHERE class_id=@id AND status='HELD' AND expires_at <= clock_timestamp()", ("id", id)))
+            await e.ExecuteNonQueryAsync();
+        long used;
+        await using (var u = Cmd(c, tx, "SELECT count(*) FROM holds WHERE class_id=@id AND status IN ('HELD','CONFIRMED')", ("id", id)))
+            used = (long)(await u.ExecuteScalarAsync())!;
+        if (totalSeats < used) { await tx.RollbackAsync(); return (Outcome.SeatsBelowUsed, null); }
+        await using (var up = Cmd(c, tx, "UPDATE classes SET name=@n, total_seats=@t WHERE id=@id", ("n", name), ("t", totalSeats), ("id", id)))
+            await up.ExecuteNonQueryAsync();
+        await tx.CommitAsync();
+        return (Outcome.Ok, new ClassRow(id, name, totalSeats));
+    }
+
+    /// <summary>Admin delete = close the class: it disappears from the lists and takes no new applications.
+    /// Running (HELD) applications are cancelled; CONFIRMED admissions stay in the database.</summary>
+    public async Task<Outcome> DeleteClassAsync(string id)
+    {
+        await using var c = await _ds.OpenConnectionAsync();
+        await using var tx = await c.BeginTransactionAsync();
+        await using (var q = Cmd(c, tx, "SELECT 1 FROM classes WHERE id=@id AND deleted_at IS NULL FOR UPDATE", ("id", id)))
+            if (await q.ExecuteScalarAsync() is null) { await tx.RollbackAsync(); return Outcome.NotFound; }
+        await using (var h = Cmd(c, tx, "UPDATE holds SET status='CANCELLED' WHERE class_id=@id AND status='HELD'", ("id", id)))
+            await h.ExecuteNonQueryAsync();
+        await using (var d = Cmd(c, tx, "UPDATE classes SET deleted_at=clock_timestamp() WHERE id=@id", ("id", id)))
+            await d.ExecuteNonQueryAsync();
+        await tx.CommitAsync();
+        return Outcome.Ok;
     }
 
     // ---------- holds ----------
@@ -128,7 +166,7 @@ ORDER BY c.created_at, c.id";
         // 1) lock the class row: all applications for one class are serialised here,
         //    so "count used seats, then insert" can never interleave between requests.
         int total;
-        await using (var q = Cmd(c, tx, "SELECT total_seats FROM classes WHERE id=@id FOR UPDATE", ("id", classId)))
+        await using (var q = Cmd(c, tx, "SELECT total_seats FROM classes WHERE id=@id AND deleted_at IS NULL FOR UPDATE", ("id", classId)))
         {
             var o = await q.ExecuteScalarAsync();
             if (o is null) { await tx.RollbackAsync(); return (Outcome.NotFound, null); }
