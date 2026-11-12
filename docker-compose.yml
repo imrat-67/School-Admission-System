@@ -20,7 +20,7 @@ services:
   backend:
     build: ./backend
     environment:
-      DB_CONNECTION_STRING: "Host=db;Port=5432;Database=admission;Username=admission;Password=admission;Maximum Pool Size=200"
+      DB_CONNECTION_STRING: "Host=db;Port=5432;Database=admission;Username=admission;Password=admission;Maximum Pool Size=50"
       HOLD_DURATION_SECONDS: "${HOLD_DURATION_SECONDS:-600}"
     ports:
       - "8080:8080"

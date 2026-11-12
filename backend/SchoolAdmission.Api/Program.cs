@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Npgsql;
 using SchoolAdmission.Api;
@@ -12,7 +13,11 @@ builder.Services.AddSingleton(new NpgsqlDataSourceBuilder(connStr).Build());
 builder.Services.AddSingleton(new HoldSettings(holdSeconds));
 builder.Services.AddSingleton<Repo>();
 builder.Services.AddHostedService<ExpirySweeper>();
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+// The browser (frontend :3000) calls this API (:8080) directly. "Date" is exposed so the UI can read the
+// server clock for its countdown (browsers hide it from JavaScript otherwise).
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod().WithExposedHeaders("Date")));
+// numbers must really be JSON numbers: "totalSeats":"10" is rejected with 400
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
 
 var app = builder.Build();
 await app.Services.GetRequiredService<Repo>().InitAsync();
@@ -29,6 +34,13 @@ app.Use(async (ctx, next) =>
         ctx.Response.StatusCode = 400;
         await ctx.Response.WriteAsJsonAsync(new ErrorBody("Request body is not valid JSON or has wrong field types.", "INVALID_REQUEST"));
     }
+    catch (PostgresException ex) when (ex.SqlState != null && ex.SqlState.StartsWith("22"))
+    {
+        // class 22 = "data exception" (e.g. NUL character in text): the client sent bad data, not a server fault
+        if (ctx.Response.HasStarted) throw;
+        ctx.Response.StatusCode = 400;
+        await ctx.Response.WriteAsJsonAsync(new ErrorBody("The request contains characters or values that are not allowed.", "INVALID_REQUEST"));
+    }
     catch (Exception ex)
     {
         app.Logger.LogError(ex, "Unhandled error");
@@ -38,7 +50,8 @@ app.Use(async (ctx, next) =>
     }
 });
 
-var studentIdRegex = new Regex(@"^\d{17}$", RegexOptions.Compiled);
+// ASCII digits only. (.NET "\d" would also accept Bengali digits, which would let one student appear under two different ids.)
+var studentIdRegex = new Regex("^[0-9]{17}$", RegexOptions.Compiled);
 
 static string Iso(DateTime d) => d.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
 static IResult Err(int status, string code, string msg) => Results.Json(new ErrorBody(msg, code), statusCode: status);
@@ -65,7 +78,6 @@ IResult OutcomeError(Outcome o) => o switch
     Outcome.Expired => Err(409, "HOLD_EXPIRED", "The hold has expired."),
     Outcome.Cancelled => Err(409, "HOLD_CANCELLED", "The application was cancelled."),
     Outcome.Confirmed => Err(409, "ALREADY_CONFIRMED", "A confirmed admission cannot be cancelled."),
-    Outcome.SeatsBelowUsed => Err(409, "SEATS_BELOW_USED", "totalSeats cannot be less than the seats already held or confirmed."),
     _ => Err(500, "SERVER_ERROR", "Unexpected server error.")
 };
 
@@ -73,30 +85,15 @@ app.MapPost("/classes", async (CreateClassRequest? body, Repo repo) =>
 {
     var name = body?.Name?.Trim();
     if (string.IsNullOrEmpty(name)) return Err(400, "INVALID_NAME", "name is required.");
-    if (name.Length > 200) return Err(400, "INVALID_NAME", "name is too long (max 200 characters).");
+    if (name.Length > 200 || name.Any(char.IsControl))
+        return Err(400, "INVALID_NAME", "name must be at most 200 characters and contain no control characters.");
     if (body!.TotalSeats is null || body.TotalSeats < 1 || body.TotalSeats > 100000)
         return Err(400, "INVALID_SEATS", "totalSeats must be a whole number between 1 and 100000.");
     var row = await repo.CreateClassAsync(name, body.TotalSeats.Value);
     return Results.Json(new { id = row.Id, name = row.Name, totalSeats = row.TotalSeats }, statusCode: 201);
 });
 
-// Admin extras (not in the spec's 8 endpoints, the 8 contracts are untouched)
-app.MapPut("/classes/{classId}", async (string classId, CreateClassRequest? body, Repo repo) =>
-{
-    var name = body?.Name?.Trim();
-    if (string.IsNullOrEmpty(name)) return Err(400, "INVALID_NAME", "name is required.");
-    if (name.Length > 200) return Err(400, "INVALID_NAME", "name is too long (max 200 characters).");
-    if (body!.TotalSeats is null || body.TotalSeats < 1 || body.TotalSeats > 100000)
-        return Err(400, "INVALID_SEATS", "totalSeats must be a whole number between 1 and 100000.");
-    var (o, row) = await repo.UpdateClassAsync(classId, name, body.TotalSeats.Value);
-    return o == Outcome.Ok ? Results.Ok(new { id = row!.Id, name = row.Name, totalSeats = row.TotalSeats }) : OutcomeError(o);
-});
-
-app.MapDelete("/classes/{classId}", async (string classId, Repo repo) =>
-{
-    var o = await repo.DeleteClassAsync(classId);
-    return o == Outcome.Ok ? Results.NoContent() : OutcomeError(o);
-});
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapGet("/classes", async (Repo repo) => Results.Ok(await repo.ListClassesAsync()));
 
@@ -120,7 +117,7 @@ app.MapGet("/holds/{holdId}", async (string holdId, Repo repo) =>
     var h = await repo.GetHoldAsync(holdId);
     return h is null
         ? Err(404, "NOT_FOUND", "Application not found.")
-        : Results.Ok(new { holdId = h.HoldId, classId = h.ClassId, studentId = h.StudentId, status = h.Status, expiresAt = Iso(h.ExpiresAt) });
+        : Results.Ok(new { holdId = h.HoldId, classId = h.ClassId, status = h.Status, expiresAt = Iso(h.ExpiresAt) });
 });
 
 app.MapPost("/holds/{holdId}/confirm", async (string holdId, HttpRequest req, Repo repo) =>

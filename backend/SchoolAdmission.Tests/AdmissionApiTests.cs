@@ -14,7 +14,7 @@ public class ApiFixture : WebApplicationFactory<Program>
     public ApiFixture()
     {
         var cs = Environment.GetEnvironmentVariable("TEST_DB_CONNECTION")
-                 ?? "Host=localhost;Port=5432;Database=admission_test;Username=admission;Password=admission;Maximum Pool Size=200";
+                 ?? "Host=localhost;Port=5432;Database=admission_test;Username=admission;Password=admission;Maximum Pool Size=50";
         Environment.SetEnvironmentVariable("DB_CONNECTION_STRING", cs);
         Environment.SetEnvironmentVariable("HOLD_DURATION_SECONDS", "600");
     }
@@ -140,6 +140,9 @@ public class AdmissionApiTests : IClassFixture<ApiFixture>
     [InlineData("{\"name\":\"X\",\"totalSeats\":-5}")]
     [InlineData("{\"name\":\"X\",\"totalSeats\":\"many\"}")]
     [InlineData("{\"name\":\"X\",\"totalSeats\":2.5}")]
+    [InlineData("{\"name\":\"X\",\"totalSeats\":\"10\"}")]            // a string is not a number
+    [InlineData("{\"name\":\"a\\u0000b\",\"totalSeats\":5}")]         // NUL character: used to be a 500
+    [InlineData("{\"name\":\"line1\\nline2\",\"totalSeats\":5}")]     // control character
     [InlineData("not json at all")]
     public async Task Bad_class_input_gives_4xx_never_500(string body)
     {
@@ -163,37 +166,56 @@ public class AdmissionApiTests : IClassFixture<ApiFixture>
     }
 
     [Fact]
-    public async Task Admin_can_edit_a_class_but_never_below_the_seats_already_used()
+    public async Task Bengali_digits_are_not_accepted_as_a_student_id()
     {
-        var cid = await NewClass(5);
-        Assert.Equal(HttpStatusCode.Created, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
-        var low = await _http.PutAsJsonAsync("/classes/" + cid, new { name = "Class 7 Day Shift", totalSeats = 1 });
-        Assert.Equal(HttpStatusCode.Conflict, low.StatusCode);
-        var ok = await _http.PutAsJsonAsync("/classes/" + cid, new { name = "Class 7 Day Shift", totalSeats = 8 });
-        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
-        var s = await Stats(cid);
-        Assert.Equal("Class 7 Day Shift", s.GetProperty("name").GetString());
-        Assert.Equal(8, s.GetProperty("totalSeats").GetInt32());
-        Assert.Equal(6, s.GetProperty("availableSeats").GetInt32());
-        Assert.Equal(HttpStatusCode.BadRequest, (await _http.PutAsJsonAsync("/classes/" + cid, new { name = "", totalSeats = 3 })).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.PutAsJsonAsync("/classes/nope", new { name = "X", totalSeats = 3 })).StatusCode);
+        var cid = await NewClass(3);
+        var bengali = "১২৩৪৫৬৭৮৯০১২৩৪৫৬৭"; // 17 Bengali digits
+        Assert.Equal(HttpStatusCode.BadRequest, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", bengali)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Send(HttpMethod.Get, "/me/holds", bengali)).StatusCode);
     }
 
     [Fact]
-    public async Task Deleting_a_class_hides_it_stops_applications_and_keeps_confirmed_admissions()
+    public async Task Hold_status_does_not_leak_the_student_id_and_has_the_documented_fields()
     {
-        var cid = await NewClass(3);
-        var a = NewStudent(); var b = NewStudent();
-        var hA = (await Json(await Send(HttpMethod.Post, $"/classes/{cid}/holds", a))).GetProperty("holdId").GetString()!;
-        Assert.Equal(HttpStatusCode.OK, (await Send(HttpMethod.Post, $"/holds/{hA}/confirm", a)).StatusCode);
-        var hB = (await Json(await Send(HttpMethod.Post, $"/classes/{cid}/holds", b))).GetProperty("holdId").GetString()!;
-        Assert.Equal(HttpStatusCode.NoContent, (await _http.DeleteAsync("/classes/" + cid)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync("/classes/" + cid)).StatusCode);
-        Assert.DoesNotContain((await Json(await _http.GetAsync("/classes"))).EnumerateArray(), c => c.GetProperty("id").GetString() == cid);
-        Assert.Equal(HttpStatusCode.NotFound, (await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent())).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.DeleteAsync("/classes/" + cid)).StatusCode);
-        Assert.Equal("CONFIRMED", (await Json(await _http.GetAsync("/holds/" + hA))).GetProperty("status").GetString());
-        Assert.Equal("CANCELLED", (await Json(await _http.GetAsync("/holds/" + hB))).GetProperty("status").GetString());
+        var cid = await NewClass(2);
+        var hold = await Json(await Send(HttpMethod.Post, $"/classes/{cid}/holds", NewStudent()));
+        var read = await Json(await _http.GetAsync("/holds/" + hold.GetProperty("holdId").GetString()));
+        Assert.False(read.TryGetProperty("studentId", out _));
+        foreach (var f in new[] { "holdId", "classId", "status", "expiresAt" }) Assert.True(read.TryGetProperty(f, out _), f);
+        Assert.EndsWith("Z", read.GetProperty("expiresAt").GetString());
+    }
+
+    [Fact]
+    public async Task Browser_may_read_the_Date_header_of_the_server()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, "/classes");
+        req.Headers.Add("Origin", "http://localhost:3000");
+        var r = await _http.SendAsync(req);
+        Assert.Contains("Date", r.Headers.GetValues("Access-Control-Expose-Headers").SelectMany(v => v.Split(',')).Select(v => v.Trim()));
+    }
+
+    /// <summary>
+    /// Bonus (spec 1.6): two separate backend instances, each with its own connection pool, work on the SAME database.
+    /// The seat limit is enforced by the database (row lock on the class), not by memory inside one process, so it must still hold.
+    /// </summary>
+    [Fact]
+    public async Task Two_backend_instances_on_one_database_never_exceed_the_seat_limit()
+    {
+        await using var second = new ApiFixture();
+        var other = second.CreateClient();
+        var cid = await NewClass(30);
+        var tasks = Enumerable.Range(0, 400).Select(async i =>
+        {
+            var client = i % 2 == 0 ? _http : other; // alternate between instance 1 and instance 2
+            var req = new HttpRequestMessage(HttpMethod.Post, $"/classes/{cid}/holds");
+            req.Headers.Add("X-Student-Id", NewStudent());
+            return (int)(await client.SendAsync(req)).StatusCode;
+        }).ToArray();
+        var codes = await Task.WhenAll(tasks);
+        Assert.Equal(30, codes.Count(c => c == 201));
+        Assert.Equal(370, codes.Count(c => c == 409));
+        var s = await Json(await other.GetAsync("/classes/" + cid));
+        Assert.Equal(30, s.GetProperty("heldSeats").GetInt32());
+        Assert.Equal(0, s.GetProperty("availableSeats").GetInt32());
     }
 }

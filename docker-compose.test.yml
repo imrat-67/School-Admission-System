@@ -21,7 +21,7 @@ services:
     volumes:
       - ./backend:/src
     environment:
-      TEST_DB_CONNECTION: "Host=testdb;Port=5432;Database=admission_test;Username=admission;Password=admission;Maximum Pool Size=200"
+      TEST_DB_CONNECTION: "Host=testdb;Port=5432;Database=admission_test;Username=admission;Password=admission;Maximum Pool Size=50"
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
     command: ["dotnet", "test", "SchoolAdmission.Tests/SchoolAdmission.Tests.csproj", "--logger", "console;verbosity=normal"]
     depends_on:
