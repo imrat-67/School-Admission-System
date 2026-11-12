@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { fmtCountdown, effectiveStatus, activeHold, HoldCard, parseClassName, classLabel } from './App.jsx';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import App, { fmtCountdown, effectiveStatus, activeHold, HoldCard, parseClassName, classLabel } from './App.jsx';
 import { errorText, ApiError } from './api.js';
 
 const NOW = Date.parse('2026-01-01T10:00:00Z');
@@ -60,5 +60,25 @@ describe('one student, one application', () => {
     expect(activeHold([hold('HELD', '2026-01-01T09:59:00Z')], NOW)).toBeNull();
     expect(activeHold([hold('CANCELLED', '2026-01-01T10:05:00Z')], NOW)).toBeNull();
     expect(activeHold([], NOW)).toBeNull();
+  });
+});
+
+describe('apply when the student already has an application', () => {
+  it('opens a dialog that tells the user to change the birth registration number', async () => {
+    localStorage.setItem('studentId', '20120101234567890');
+    const future = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const reply = (data) => Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve(data) });
+    vi.stubGlobal('fetch', vi.fn((url) => String(url).endsWith('/me/holds')
+      ? reply([{ holdId: 'h_1', classId: 'c_1', className: 'Class 6 Morning Shift', status: 'HELD', expiresAt: future }])
+      : reply([{ id: 'c_2', name: 'Class 7 Day Shift', totalSeats: 10, heldSeats: 0, confirmedSeats: 0, availableSeats: 10 }])));
+    window.location.hash = '#/';
+    render(<App />);
+    fireEvent.click(await screen.findByRole('tab', { name: /ক্লাস 7/ }));
+    const btn = await screen.findByRole('button', { name: 'আবেদন করুন' });
+    await waitFor(() => expect(screen.getByText(/নম্বর পরিবর্তন করুন/, { selector: 'button.link' })).toBeInTheDocument());
+    fireEvent.click(btn);
+    expect(await screen.findByRole('dialog')).toHaveTextContent('ইতিমধ্যে আবেদন করেছে');
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/holds'), expect.objectContaining({ method: 'POST' }));
+    vi.unstubAllGlobals();
   });
 });
