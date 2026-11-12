@@ -54,6 +54,8 @@ All requests/responses are JSON. Student identity is the `X-Student-Id` header (
 | POST | `/holds/{holdId}/confirm` | 200 `{holdId,status:"CONFIRMED"}` |
 | DELETE | `/holds/{holdId}` | 204 |
 | GET | `/me/holds` | 200 list |
+| PUT | `/classes/{classId}` | extra (admin): 200 `{id,name,totalSeats}`; 409 if seats < held+confirmed |
+| DELETE | `/classes/{classId}` | extra (admin): 204, class is closed (soft delete) |
 
 Errors are always 4xx with `{ "error": "...", "code": "..." }` (never a 500 for bad input).
 
